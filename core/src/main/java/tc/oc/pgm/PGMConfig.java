@@ -604,6 +604,19 @@ public final class PGMConfig implements Config {
     private final Permission observerPermission;
     private final Permission participantPermission;
 
+    public Group(
+        String id,
+        Flair flair,
+        Permission permission,
+        Permission observerPermission,
+        Permission participantPermission) {
+      this.id = id;
+      this.flair = flair;
+      this.permission = permission;
+      this.observerPermission = observerPermission;
+      this.participantPermission = participantPermission;
+    }
+
     public Group(ConfigurationSection config) throws TextException {
       this.id = config.getName();
       this.flair = new Flair(config);
@@ -676,6 +689,23 @@ public final class PGMConfig implements Config {
     private String clickLink;
     private Component prefixOverride;
     private Component suffixOverride;
+
+    public Flair(
+        String prefix,
+        String suffix,
+        String displayName,
+        String description,
+        String clickLink,
+        Component prefixOverride,
+        Component suffixOverride) {
+      this.prefix = prefix;
+      this.suffix = suffix;
+      this.displayName = displayName;
+      this.description = description;
+      this.clickLink = clickLink;
+      this.prefixOverride = prefixOverride;
+      this.suffixOverride = suffixOverride;
+    }
 
     public Flair(ConfigurationSection config) {
       final String prefix = config.getString("prefix");
