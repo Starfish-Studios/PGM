@@ -33,7 +33,7 @@ import tc.oc.pgm.util.xml.XMLUtils;
 
 public class WoolModule implements MapModule {
   private static final Collection<MapTag> TAGS =
-      ImmutableList.of(MapTag.create("wool", "Capture the Wool", true, false));
+      ImmutableList.of(new MapTag("ctw", "wool", "Capture the Wool", true, false));
 
   protected final Multimap<TeamFactory, MonumentWoolFactory> woolFactories;
 
@@ -79,7 +79,7 @@ public class WoolModule implements MapModule {
     public WoolModule parse(MapFactory factory, Logger logger, Document doc)
         throws InvalidXMLException {
       Multimap<TeamFactory, MonumentWoolFactory> woolFactories = ArrayListMultimap.create();
-      TeamModule teamModule = factory.getModule(TeamModule.class);
+      TeamModule teamModule = factory.needModule(TeamModule.class);
       RegionParser parser = factory.getRegions();
 
       for (Element woolEl : XMLUtils.flattenElements(doc.getRootElement(), "wools", "wool")) {
