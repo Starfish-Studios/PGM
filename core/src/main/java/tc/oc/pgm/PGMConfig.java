@@ -597,7 +597,7 @@ public final class PGMConfig implements Config {
     return experiments;
   }
 
-  private static class Group implements Config.Group {
+  public static class Group implements Config.Group {
     private final String id;
     private final Flair flair;
     private final Permission permission;
@@ -680,7 +680,7 @@ public final class PGMConfig implements Config {
     }
   }
 
-  private static class Flair implements Config.Flair {
+  public static class Flair implements Config.Flair {
 
     private String prefix;
     private String suffix;
