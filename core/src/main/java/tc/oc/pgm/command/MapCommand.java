@@ -7,6 +7,7 @@ import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.Component.translatable;
 import static net.kyori.adventure.text.event.ClickEvent.runCommand;
 import static net.kyori.adventure.text.event.HoverEvent.showText;
+import static tc.oc.pgm.util.text.TextException.invalidFormat;
 
 import app.ashcon.intake.Command;
 import app.ashcon.intake.CommandException;
@@ -34,6 +35,7 @@ import tc.oc.pgm.api.map.Contributor;
 import tc.oc.pgm.api.map.MapInfo;
 import tc.oc.pgm.api.map.MapLibrary;
 import tc.oc.pgm.api.map.MapTag;
+import tc.oc.pgm.api.map.Phase;
 import tc.oc.pgm.rotation.MapPool;
 import tc.oc.pgm.rotation.MapPoolManager;
 import tc.oc.pgm.util.Audience;
@@ -48,14 +50,16 @@ public final class MapCommand {
   @Command(
       aliases = {"maps", "maplist", "ml"},
       desc = "List all maps loaded",
-      usage = "[-a <author>] [-t <tag1>,<tag2>]")
+      usage = "[-a <author>] [-t <tag1>,<tag2>] [-n <name>]")
   public void maps(
       Audience audience,
       CommandSender sender,
       MapLibrary library,
       @Default("1") Integer page,
       @Fallback(Type.NULL) @Switch('t') String tags,
-      @Fallback(Type.NULL) @Switch('a') String author)
+      @Fallback(Type.NULL) @Switch('a') String author,
+      @Fallback(Type.NULL) @Switch('n') String name,
+      @Fallback(Type.NULL) @Switch('p') String phaseType)
       throws CommandException {
     Stream<MapInfo> search = Sets.newHashSet(library.getMaps()).stream();
     if (tags != null) {
@@ -75,6 +79,15 @@ public final class MapCommand {
     if (author != null) {
       search = search.filter(map -> matchesAuthor(map, author));
     }
+
+    if (name != null) {
+      search = search.filter(map -> matchesName(map, name));
+    }
+
+    Phase phase = phaseType == null ? Phase.PRODUCTION : Phase.of(phaseType);
+    if (phase == null) throw invalidFormat(phaseType, Phase.class, null);
+
+    search = search.filter(map -> map.getPhase() == phase);
 
     Set<MapInfo> maps = search.collect(Collectors.toCollection(TreeSet::new));
     int resultsPerPage = 8;
@@ -134,6 +147,18 @@ public final class MapCommand {
       }
     }
     return false;
+  }
+
+  private static boolean matchesName(MapInfo map, String query) {
+    checkNotNull(map);
+    query = checkNotNull(query).toLowerCase();
+    return map.getName().toLowerCase().contains(query);
+  }
+
+  private static boolean matchesPhase(MapInfo map, String query) {
+    checkNotNull(map);
+    query = checkNotNull(query).toLowerCase();
+    return map.getPhase().equals(Phase.of(query));
   }
 
   @Command(
@@ -214,6 +239,12 @@ public final class MapCommand {
           text()
               .append(mapInfoLabel("map.info.proto"))
               .append(text(map.getProto().toString(), NamedTextColor.GOLD))
+              .build());
+
+      audience.sendMessage(
+          text()
+              .append(mapInfoLabel("map.info.phase"))
+              .append(map.getPhase().toComponent().color(NamedTextColor.GOLD))
               .build());
     }
 

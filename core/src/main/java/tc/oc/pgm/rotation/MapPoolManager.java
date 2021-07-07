@@ -1,5 +1,6 @@
 package tc.oc.pgm.rotation;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import java.io.File;
 import java.io.IOException;
@@ -14,6 +15,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import org.apache.commons.io.FileUtils;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import tc.oc.pgm.api.Datastore;
@@ -40,6 +42,7 @@ public class MapPoolManager implements MapOrder {
 
   private Map<MapPool, MapActivity> mapPools = Maps.newHashMap();
   private MapPool activeMapPool;
+  private MapOrder fallback; // Fallback map order in case no pool exists
 
   /* If a time limit is added via /setpool <name> -t [time], then after this duration the map pool will revert automatically */
   private Duration poolTimeLimit = null;
@@ -90,65 +93,52 @@ public class MapPoolManager implements MapOrder {
     loadMapPools();
   }
 
-  private int loadMapPools() {
-    List<MapPool> pools =
-        mapPoolFileConfig.getConfigurationSection("pools").getKeys(false).stream()
-            .map(key -> MapPool.of(this, mapPoolFileConfig, key))
-            .filter(MapPool::isEnabled)
-            .collect(Collectors.toList());
-
-    List<MapActivity> activity =
-        pools.stream()
-            .map(MapPool::getName)
-            .map(database::getMapActivity)
-            .collect(Collectors.toList());
-
+  private void loadMapPools() {
     this.mapPools.clear(); // For reloads
 
-    pools.forEach(
-        pool ->
-            mapPools.put(
-                pool,
-                activity.stream()
-                    .filter(a -> a.getPoolName().equalsIgnoreCase(pool.getName()))
-                    .findAny()
-                    .orElse(null)));
+    ConfigurationSection pools = mapPoolFileConfig.getConfigurationSection("pools");
+    if (pools != null && pools.getKeys(false) != null && !pools.getKeys(false).isEmpty()) {
+      pools.getKeys(false).stream()
+          .map(key -> MapPool.of(this, mapPoolFileConfig, key))
+          .filter(MapPool::isEnabled)
+          .forEach(pool -> mapPools.put(pool, database.getMapActivity(pool.getName())));
 
-    Optional<MapActivity> lastActive =
-        mapPools.values().stream().filter(ma -> ma.isActive()).findFirst();
-    if (lastActive.isPresent()) {
-      activeMapPool = getMapPoolByName(lastActive.get().getPoolName());
+      activeMapPool =
+          mapPools.entrySet().stream()
+              .filter(e -> e.getValue().isActive())
+              .findFirst()
+              .map(Map.Entry::getKey)
+              .orElse(null);
     }
 
     if (activeMapPool == null) {
       logger.log(Level.WARNING, "No active map pool was found, defaulting to first dynamic pool.");
       activeMapPool =
-          mapPools.keySet().stream().sorted().filter(mp -> mp.isDynamic()).findFirst().orElse(null);
+          mapPools.keySet().stream().sorted().filter(MapPool::isDynamic).findFirst().orElse(null);
       if (activeMapPool == null) {
-        logger.log(Level.SEVERE, "Failed to find any dynamic map pool!");
+        logger.log(
+            Level.SEVERE,
+            "Failed to find any dynamic map pool! Will use fallback map order (shuffled)");
       }
     } else {
       logger.log(Level.INFO, "Resuming last active map pool (" + activeMapPool.getName() + ")");
     }
-
-    return pools.size();
   }
 
   public void saveMapPools() {
-    mapPools.entrySet().stream()
-        .forEach(
-            e -> {
-              String nextMap = null;
-              if (e.getKey() instanceof Rotation) {
-                nextMap = e.getKey().getNextMap().getName();
-              }
+    mapPools.forEach(
+        (key, value) -> {
+          String nextMap = null;
+          if (key instanceof Rotation) {
+            nextMap = key.getNextMap().getName();
+          }
 
-              boolean active =
-                  getActiveMapPool() != null
-                      && getActiveMapPool().getName().equalsIgnoreCase(e.getKey().getName())
-                      && e.getKey().isDynamic();
-              e.getValue().update(nextMap, active);
-            });
+          boolean active =
+              getActiveMapPool() != null
+                  && getActiveMapPool().getName().equalsIgnoreCase(key.getName())
+                  && key.isDynamic();
+          value.update(nextMap, active);
+        });
   }
 
   public MapPool getActiveMapPool() {
@@ -174,7 +164,9 @@ public class MapPoolManager implements MapOrder {
 
     if (mapPool == activeMapPool) return;
 
-    activeMapPool.unloadPool(match);
+    if (activeMapPool != null) {
+      activeMapPool.unloadPool(match);
+    }
 
     // Set new active pool
     activeMapPool = mapPool;
@@ -220,6 +212,12 @@ public class MapPoolManager implements MapOrder {
     return options;
   }
 
+  public MapOrder getFallback() {
+    if (fallback == null)
+      fallback = new RandomMapOrder(Lists.newArrayList(PGM.get().getMapLibrary().getMaps()));
+    return fallback;
+  }
+
   @Override
   public MapInfo popNextMap() {
     if (overriderMap != null) {
@@ -229,7 +227,7 @@ public class MapPoolManager implements MapOrder {
     }
 
     if (activeMapPool == null) {
-      getActiveMapPool();
+      return getFallback().popNextMap();
     }
 
     return activeMapPool.popNextMap();
@@ -239,13 +237,20 @@ public class MapPoolManager implements MapOrder {
   public MapInfo getNextMap() {
     if (overriderMap != null) return overriderMap;
     if (activeMapPool != null) return activeMapPool.getNextMap();
+    if (activeMapPool == null) return getFallback().getNextMap();
     return null;
   }
 
   @Override
   public void setNextMap(MapInfo map) {
     overriderMap = map;
-    activeMapPool.setNextMap(map); // Notify pool a next map has been set
+
+    // Notify pool/fallback a next map has been set
+    if (activeMapPool != null) {
+      activeMapPool.setNextMap(map);
+    } else {
+      getFallback().setNextMap(map);
+    }
   }
 
   @Override
@@ -256,13 +261,10 @@ public class MapPoolManager implements MapOrder {
   }
 
   public Optional<MapPool> getAppropriateDynamicPool(Match match) {
-    int obs =
-        match.getModule(BlitzMatchModule.class) != null
-            ? (int) (match.getObservers().size() * 0.85)
-            : (int) (match.getObservers().size() * 0.5);
-    int activePlayers = match.getPlayers().size() - obs;
+    double obsBias = match.getModule(BlitzMatchModule.class) != null ? 0.85 : 0.5;
+    double activePlayers = match.getParticipants().size() + match.getObservers().size() * obsBias;
     return mapPools.keySet().stream()
-        .filter(pool -> pool.isDynamic())
+        .filter(MapPool::isDynamic)
         .filter(pool -> activePlayers >= pool.getPlayers())
         .max(MapPool::compareTo);
   }
@@ -273,6 +275,11 @@ public class MapPoolManager implements MapOrder {
       matchCount++;
     }
 
+    if (activeMapPool == null) {
+      getFallback().matchEnded(match);
+      return;
+    }
+
     if (activeMapPool.isDynamic() || shouldRevert(match)) {
       getAppropriateDynamicPool(match).ifPresent(pool -> updateActiveMapPool(pool, match));
     }
@@ -280,11 +287,18 @@ public class MapPoolManager implements MapOrder {
     activeMapPool.matchEnded(match);
   }
 
+  @Override
+  public Duration getCycleTime() {
+    Duration cycleTime;
+    if (activeMapPool != null && !(cycleTime = activeMapPool.getCycleTime()).isNegative()) {
+      return cycleTime;
+    }
+    return PGM.get().getConfiguration().getCycleTime();
+  }
+
   private boolean shouldRevert(Match match) {
-    return !match.getPlayers().stream()
-            .filter(mp -> mp.getBukkit().hasPermission(Permissions.STAFF))
-            .findAny()
-            .isPresent()
+    return match.getPlayers().stream()
+            .noneMatch(mp -> mp.getBukkit().hasPermission(Permissions.STAFF))
         || !activeMapPool.isDynamic()
             && poolTimeLimit != null
             && TimeUtils.isLongerThan(Duration.between(poolStartTime, Instant.now()), poolTimeLimit)

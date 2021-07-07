@@ -28,7 +28,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
-import org.bukkit.event.player.PlayerLocaleChangeEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -63,6 +62,7 @@ import tc.oc.pgm.teams.Team;
 import tc.oc.pgm.teams.TeamMatchModule;
 import tc.oc.pgm.util.LegacyFormatUtils;
 import tc.oc.pgm.util.StringUtils;
+import tc.oc.pgm.util.event.player.PlayerLocaleChangeEvent;
 import tc.oc.pgm.util.inventory.InventoryUtils;
 import tc.oc.pgm.util.text.TextTranslations;
 
@@ -174,12 +174,17 @@ public class PickerMatchModule implements MatchModule, Listener {
     return teams;
   }
 
+  /** Get if the player participated in blitz match and was eliminated * */
+  private boolean hasParticipated(MatchPlayer player) {
+    return isBlitz && match.getModule(BlitzMatchModule.class).isPlayerEliminated(player.getId());
+  }
+
   /** Does the player have any use for the picker? */
   private boolean canUse(MatchPlayer player) {
     if (player == null) return false;
 
     // Player is eliminated from Blitz
-    if (isBlitz && match.isRunning()) return false;
+    if (isBlitz && match.isRunning() && hasParticipated(player)) return false;
 
     // Player is not observing or dead
     if (!(player.isObserving() || player.isDead())) return false;
@@ -693,10 +698,8 @@ public class PickerMatchModule implements MatchModule, Listener {
           if (cmm.getCanChangeClass(player.getId())) {
             cmm.setPlayerClass(player.getId(), cls);
             player.sendMessage(
-                text()
-                    .append(translatable("match.class.ok", NamedTextColor.GOLD))
-                    .append(text(name, NamedTextColor.GREEN))
-                    .build());
+                translatable(
+                    "match.class.ok", NamedTextColor.GOLD, text(name, NamedTextColor.GREEN)));
             scheduleRefresh(player);
           } else {
             player.sendMessage(translatable("match.class.sticky", NamedTextColor.RED));

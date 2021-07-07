@@ -28,7 +28,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerLocaleChangeEvent;
 import tc.oc.pgm.api.Config;
 import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.map.MapInfo;
@@ -65,6 +64,7 @@ import tc.oc.pgm.score.ScoreMatchModule;
 import tc.oc.pgm.spawns.events.ParticipantSpawnEvent;
 import tc.oc.pgm.teams.events.TeamRespawnsChangeEvent;
 import tc.oc.pgm.util.TimeUtils;
+import tc.oc.pgm.util.event.player.PlayerLocaleChangeEvent;
 import tc.oc.pgm.util.text.TextFormatter;
 import tc.oc.pgm.util.text.TextTranslations;
 import tc.oc.pgm.wool.MonumentWool;
@@ -87,6 +87,7 @@ public class SidebarMatchModule implements MatchModule, Listener {
 
   public static final int MAX_ROWS = 16; // Max rows on the scoreboard
   public static final int MAX_LENGTH = 30; // Max characters per line allowed
+  public static final int MAX_TITLE = 32; // Max characters allowed in title
 
   protected final Map<UUID, FastBoard> sidebars = new HashMap<>();
   protected final Map<Goal, BlinkTask> blinkingGoals = new HashMap<>();
@@ -153,6 +154,10 @@ public class SidebarMatchModule implements MatchModule, Listener {
     for (BlinkTask task : ImmutableSet.copyOf(this.blinkingGoals.values())) {
       task.stop();
     }
+  }
+
+  @Override
+  public void unload() {
     this.sidebars.clear();
   }
 
@@ -169,7 +174,7 @@ public class SidebarMatchModule implements MatchModule, Listener {
 
   @EventHandler
   public void removePlayer(PlayerLeaveMatchEvent event) {
-    sidebars.remove(event.getPlayer().getId());
+    sidebars.remove(event.getPlayer().getId()).delete();
     renderSidebarDebounce();
   }
 
@@ -384,7 +389,7 @@ public class SidebarMatchModule implements MatchModule, Listener {
 
       // Scores/Blitz
       if (hasScores || isBlitz) {
-        for (Competitor competitor : match.getCompetitors()) {
+        for (Competitor competitor : match.getSortedCompetitors()) {
           String text;
           if (hasScores) {
             text = renderScore(competitor);
@@ -413,7 +418,7 @@ public class SidebarMatchModule implements MatchModule, Listener {
       }
 
       // Team-specific goals
-      List<Competitor> sortedCompetitors = new ArrayList<>(match.getCompetitors());
+      List<Competitor> sortedCompetitors = new ArrayList<>(match.getSortedCompetitors());
       sortedCompetitors.retainAll(competitorsWithGoals);
 
       if (party instanceof Competitor) {
@@ -495,7 +500,8 @@ public class SidebarMatchModule implements MatchModule, Listener {
         if (rows.get(i).length() > MAX_LENGTH) rows.set(i, rows.get(i).substring(0, MAX_LENGTH));
       }
 
-      sidebar.updateTitle(TextTranslations.translateLegacy(title, viewer));
+      String titleStr = TextTranslations.translateLegacy(title, viewer);
+      sidebar.updateTitle(titleStr.substring(0, Math.min(titleStr.length(), MAX_TITLE)));
       sidebar.updateLines(rows.size() < MAX_ROWS ? rows : rows.subList(0, MAX_ROWS));
     }
   }

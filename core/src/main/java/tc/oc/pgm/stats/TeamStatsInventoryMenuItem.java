@@ -1,61 +1,98 @@
 package tc.oc.pgm.stats;
 
+import static net.kyori.adventure.text.Component.text;
 import static net.kyori.adventure.text.Component.translatable;
 import static tc.oc.pgm.stats.StatsMatchModule.damageComponent;
 import static tc.oc.pgm.stats.StatsMatchModule.numberComponent;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import net.md_5.bungee.api.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
-import org.bukkit.inventory.ItemFlag;
-import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.LeatherArmorMeta;
+import tc.oc.pgm.api.Datastore;
+import tc.oc.pgm.api.PGM;
 import tc.oc.pgm.api.match.Match;
 import tc.oc.pgm.api.party.Competitor;
 import tc.oc.pgm.api.player.MatchPlayer;
-import tc.oc.pgm.menu.InventoryMenu;
-import tc.oc.pgm.menu.InventoryMenuItem;
-import tc.oc.pgm.menu.InventoryMenuUtils;
+import tc.oc.pgm.util.menu.InventoryMenu;
+import tc.oc.pgm.util.menu.InventoryMenuItem;
+import tc.oc.pgm.util.menu.pattern.DoubleRowMenuArranger;
+import tc.oc.pgm.util.menu.pattern.IdentityMenuArranger;
+import tc.oc.pgm.util.nms.NMSHacks;
 import tc.oc.pgm.util.text.TextTranslations;
 
 public class TeamStatsInventoryMenuItem implements InventoryMenuItem {
 
   private final Competitor team;
   private final InventoryMenu teamSubGUI;
+  private final Match match;
 
   private final NamedTextColor RESET = NamedTextColor.GRAY;
 
-  TeamStatsInventoryMenuItem(Match match, Competitor team) {
+  TeamStatsInventoryMenuItem(
+      Match match,
+      Competitor team,
+      Collection<MatchPlayer> relevantObservers,
+      Collection<UUID> relevantOfflinePlayers) {
+
     this.team = team;
+    StatsMatchModule smm = match.needModule(StatsMatchModule.class);
+    Collection<MatchPlayer> players = team.getPlayers();
+    List<InventoryMenuItem> items =
+        new ArrayList<>(players.size() + relevantObservers.size() + relevantOfflinePlayers.size());
+    items.addAll(
+        Stream.concat(players.stream(), relevantObservers.stream())
+            .map(
+                p ->
+                    new PlayerStatsInventoryMenuItem(
+                        p.getId(),
+                        smm.getPlayerStat(p),
+                        NMSHacks.getPlayerSkin(p.getBukkit()),
+                        p.getNameLegacy(),
+                        p.getParty().getName().color()))
+            .collect(Collectors.toList()));
+
+    Datastore datastore = PGM.get().getDatastore();
+
+    items.addAll(
+        relevantOfflinePlayers.stream()
+            .map(
+                id ->
+                    new PlayerStatsInventoryMenuItem(
+                        id,
+                        smm.getPlayerStat(id),
+                        datastore.getSkin(id),
+                        datastore.getUsername(id).getNameLegacy(),
+                        NamedTextColor.DARK_AQUA))
+            .collect(Collectors.toSet()));
+
     this.teamSubGUI =
-        InventoryMenuUtils.prettyMenu(
-            match,
+        new InventoryMenu(
+            match.getWorld(),
             translatable("match.stats.title"),
-            team.getPlayers().stream()
-                .map(PlayerStatsInventoryMenuItem::new)
-                .collect(Collectors.toList()));
+            items,
+            items.size() > 10 ? new IdentityMenuArranger(5) : new DoubleRowMenuArranger());
+    this.match = match;
   }
 
   @Override
-  public Component getName() {
-    return translatable("match.stats.team", team.getName());
+  public Component getDisplayName() {
+    return translatable("match.stats.team", team.getName().color(), team.getName());
   }
 
   @Override
-  public ChatColor getColor() {
-    return ChatColor.valueOf(team.getColor().name());
-  }
+  public List<String> getLore(Player player) {
 
-  @Override
-  public List<String> getLore(MatchPlayer player) {
-
-    StatsMatchModule smm = player.getMatch().needModule(StatsMatchModule.class);
+    StatsMatchModule smm = match.needModule(StatsMatchModule.class);
     List<String> lore = new ArrayList<>();
     int teamKills = 0;
     int teamDeaths = 0;
@@ -101,43 +138,32 @@ public class TeamStatsInventoryMenuItem implements InventoryMenuItem {
             RESET,
             numberComponent(shotsHit, NamedTextColor.YELLOW),
             numberComponent(shotsTaken, NamedTextColor.YELLOW),
-            numberComponent(teamBowAcc, NamedTextColor.YELLOW));
+            numberComponent(teamBowAcc, NamedTextColor.YELLOW).append(text('%')));
 
-    Player bukkit = player.getBukkit();
-
-    lore.add(TextTranslations.translateLegacy(statLore, bukkit));
-    lore.add(TextTranslations.translateLegacy(damageDealtLore, bukkit));
-    lore.add(TextTranslations.translateLegacy(damageReceivedLore, bukkit));
-    lore.add(TextTranslations.translateLegacy(bowLore, bukkit));
+    lore.add(TextTranslations.translateLegacy(statLore, player));
+    lore.add(TextTranslations.translateLegacy(damageDealtLore, player));
+    lore.add(TextTranslations.translateLegacy(damageReceivedLore, player));
+    lore.add(TextTranslations.translateLegacy(bowLore, player));
 
     return lore;
   }
 
   @Override
-  public Material getMaterial(MatchPlayer player) {
+  public Material getMaterial(Player player) {
     return Material.LEATHER_CHESTPLATE;
   }
 
   @Override
-  public void onInventoryClick(InventoryMenu menu, MatchPlayer player, ClickType clickType) {
+  public void onInventoryClick(InventoryMenu menu, Player player, ClickType clickType) {
     teamSubGUI.display(player);
   }
 
   @Override
-  public ItemStack createItem(MatchPlayer player) {
-    ItemStack stack = new ItemStack(getMaterial(player));
-    LeatherArmorMeta meta = (LeatherArmorMeta) stack.getItemMeta();
+  public ItemMeta modifyMeta(ItemMeta meta) {
+    LeatherArmorMeta leatherArmorMeta = (LeatherArmorMeta) meta;
 
-    meta.setDisplayName(
-        getColor()
-            + ChatColor.BOLD.toString()
-            + TextTranslations.translateLegacy(getName(), player.getBukkit()));
-    meta.setLore(getLore(player));
-    meta.addItemFlags(ItemFlag.values());
-    meta.setColor(team.getFullColor());
+    leatherArmorMeta.setColor(team.getFullColor());
 
-    stack.setItemMeta(meta);
-
-    return stack;
+    return leatherArmorMeta;
   }
 }

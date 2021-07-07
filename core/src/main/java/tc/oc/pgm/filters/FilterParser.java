@@ -3,6 +3,7 @@ package tc.oc.pgm.filters;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Range;
 import java.lang.reflect.Method;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -312,6 +313,32 @@ public abstract class FilterParser {
     return new KillStreakFilter(range, repeat);
   }
 
+  @MethodParser("lives")
+  public LivesFilter parseLives(Element el) throws InvalidXMLException {
+    Integer count = XMLUtils.parseNumber(el.getAttribute("count"), Integer.class, (Integer) null);
+    Integer min = XMLUtils.parseNumber(el.getAttribute("min"), Integer.class, (Integer) null);
+    Integer max = XMLUtils.parseNumber(el.getAttribute("max"), Integer.class, (Integer) null);
+    Range<Integer> range;
+
+    if (count != null) {
+      range = Range.singleton(count);
+    } else if (min == null) {
+      if (max == null) {
+        throw new InvalidXMLException("lives filter must have a count, min, or max", el);
+      } else {
+        range = Range.atMost(max);
+      }
+    } else {
+      if (max == null) {
+        range = Range.atLeast(min);
+      } else {
+        range = Range.closed(min, max);
+      }
+    }
+
+    return new LivesFilter(range);
+  }
+
   @MethodParser("random")
   public RandomFilter parseRandom(Element el) throws InvalidXMLException {
     Node node = new Node(el);
@@ -362,6 +389,11 @@ public abstract class FilterParser {
   @MethodParser("can-fly")
   public CanFlyFilter parseCanFly(Element el) throws InvalidXMLException {
     return new CanFlyFilter();
+  }
+
+  @MethodParser("grounded")
+  public GroundedFilter parseGrounded(Element el) throws InvalidXMLException {
+    return GroundedFilter.INSTANCE;
   }
 
   @MethodParser("objective")
@@ -444,6 +476,26 @@ public abstract class FilterParser {
     return new WearingItemFilter(factory.getKits().parseRequiredItem(el));
   }
 
+  @MethodParser("effect")
+  public EffectFilter parseEffect(Element el) throws InvalidXMLException {
+    Duration minDuration = XMLUtils.parseDuration(Node.fromAttr(el, "min-duration"));
+    Duration maxDuration = XMLUtils.parseDuration(Node.fromAttr(el, "max-duration"));
+    Range<Integer> duration;
+    if (minDuration == null && maxDuration == null) {
+      duration = Range.all();
+    } else if (minDuration == null) {
+      duration = Range.atMost((int) (maxDuration.getSeconds() * 20));
+    } else if (maxDuration == null) {
+      duration = Range.atLeast((int) (minDuration.getSeconds() * 20));
+    } else {
+      duration =
+          Range.closed(
+              (int) (minDuration.getSeconds() * 20), (int) (maxDuration.getSeconds() * 20));
+    }
+    boolean amplifier = Node.fromAttr(el, "amplifier") != null;
+    return new EffectFilter(XMLUtils.parsePotionEffect(el), duration, amplifier);
+  }
+
   @MethodParser("structural-load")
   public StructuralLoadFilter parseStructuralLoad(Element el) throws InvalidXMLException {
     return new StructuralLoadFilter(XMLUtils.parseNumber(el, Integer.class));
@@ -457,6 +509,44 @@ public abstract class FilterParser {
   @MethodParser("score")
   public ScoreFilter parseScoreFilter(Element el) throws InvalidXMLException {
     return new ScoreFilter(XMLUtils.parseNumericRange(new Node(el), Integer.class));
+  }
+
+  @MethodParser("match-phase")
+  public Filter parseMatchPhase(Element el) throws InvalidXMLException {
+    return parseMatchPhaseFilter(el.getValue(), el);
+  }
+
+  @MethodParser("match-started")
+  public Filter parseMatchStarted(Element el) throws InvalidXMLException {
+    return parseMatchPhaseFilter("started", el);
+  }
+
+  @MethodParser("match-running")
+  public Filter parseMatchRunning(Element el) throws InvalidXMLException {
+    return parseMatchPhaseFilter("running", el);
+  }
+
+  @MethodParser("match-finished")
+  public Filter parseMatchFinished(Element el) throws InvalidXMLException {
+    return parseMatchPhaseFilter("finished", el);
+  }
+
+  private Filter parseMatchPhaseFilter(String matchState, Element el) throws InvalidXMLException {
+
+    switch (matchState) {
+      case "running":
+        return MatchPhaseFilter.RUNNING;
+      case "finished":
+        return MatchPhaseFilter.FINISHED;
+      case "starting":
+        return MatchPhaseFilter.STARTING;
+      case "idle":
+        return MatchPhaseFilter.IDLE;
+      case "started":
+        return MatchPhaseFilter.STARTED;
+    }
+
+    throw new InvalidXMLException("Invalid or no match state found", el);
   }
 
   // Methods for parsing QueryModifiers

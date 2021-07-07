@@ -10,7 +10,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 
 /** A wrapper for stat info belonging to a {@link tc.oc.pgm.api.player.MatchPlayer} */
-class PlayerStats {
+public class PlayerStats {
   // K/D
   private int kills;
   private int deaths;
@@ -114,6 +114,7 @@ class PlayerStats {
     return kills / Math.max(1d, deaths);
   }
 
+  // 0..100
   public double getArrowAccuracy() {
     if (shotsTaken == 0) return Double.NaN;
     return shotsHit / (shotsTaken / (double) 100);
